@@ -43,13 +43,14 @@ describe("TaskEc2 getSSTLink — regression for B1 (clusterArn)", () => {
     expect(clusterArn).toMatch(/^arn:aws:ecs:/);
   });
 
-  it("exposes clusterName, taskDefinitionArn, subnets, securityGroups in link properties", async () => {
+  it("exposes clusterName, capacityProviderName, taskDefinitionArn, subnets, securityGroups in link properties", async () => {
     const task = new TaskEc2("Full", {
       cluster: makeCluster("TaskClusterFull"),
       image: "alpine:latest",
     });
     const link = task.getSSTLink();
     expect(link.properties.clusterName).toBeDefined();
+    expect(link.properties.capacityProviderName).toBeDefined();
     expect(link.properties.taskDefinitionArn).toBeDefined();
     expect(link.properties.subnets).toBeDefined();
     expect(link.properties.securityGroups).toBeDefined();

@@ -27,20 +27,37 @@ function resolve<T>(o: pulumi.Input<T> | undefined): Promise<T | undefined> {
 }
 
 describe("createLoadBalancer HTTPS + domain", () => {
-  it("creates an ACM cert when HTTPS listener has a domain without pre-existing cert", async () => {
+  it("creates and validates an ACM cert when HTTPS listener has a hosted zone", async () => {
     const parent = new Dummy("LbHttps");
     const result = createLoadBalancer(
       "App",
       {
         ports: [{ listen: "443/https", forward: "3000/http" }],
-        domain: { name: "api.example.com" },
+        domain: { name: "api.example.com", hostedZoneId: "Z123456ABC" },
       },
       testVpc(),
       parent,
     );
     expect(result.certificate).toBeDefined();
+    expect(result.validationRecord).toBeDefined();
+    expect(result.certificateValidation).toBeDefined();
     const certDomain = await resolve(result.certificate?.domainName);
     expect(certDomain).toBe("api.example.com");
+  });
+
+  it("throws when HTTPS auto-cert is requested without a hosted zone", () => {
+    const parent = new Dummy("LbHttpsNoZone");
+    expect(() =>
+      createLoadBalancer(
+        "App",
+        {
+          ports: [{ listen: "443/https", forward: "3000/http" }],
+          domain: { name: "api.example.com" },
+        },
+        testVpc(),
+        parent,
+      ),
+    ).toThrow(/hostedZoneId/);
   });
 
   it("reuses a provided cert ARN instead of creating one", () => {

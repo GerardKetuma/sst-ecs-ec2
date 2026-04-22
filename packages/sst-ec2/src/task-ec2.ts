@@ -78,6 +78,7 @@ export class TaskEc2 extends pulumi.ComponentResource {
   public readonly publicSecurityGroup?: aws.ec2.SecurityGroup;
   public readonly clusterArn: pulumi.Output<string>;
   public readonly clusterName: pulumi.Output<string>;
+  public readonly capacityProviderName: pulumi.Output<string>;
   public readonly subnets: pulumi.Output<string[]>;
   public readonly securityGroups: pulumi.Output<string[]>;
   public readonly assignPublicIp: boolean;
@@ -158,6 +159,7 @@ export class TaskEc2 extends pulumi.ComponentResource {
     this.publicSecurityGroup = publicSecurityGroup;
     this.clusterArn = pulumi.output(args.cluster.arn);
     this.clusterName = pulumi.output(args.cluster.name);
+    this.capacityProviderName = pulumi.output(args.cluster.capacityProviderName);
     this.subnets = publicSecurityGroup
       ? pulumi.output(args.cluster.vpc.publicSubnets ?? args.cluster.vpc.containerSubnets)
       : pulumi.output(args.cluster.vpc.containerSubnets);
@@ -183,6 +185,7 @@ export class TaskEc2 extends pulumi.ComponentResource {
     const properties: Record<string, Input<string>> = {
       clusterArn: this.clusterArn,
       clusterName: this.clusterName,
+      capacityProviderName: this.capacityProviderName,
       taskDefinitionArn: this.taskDefinition.arn,
       assignPublicIp: this.assignPublicIp ? "true" : "false",
       subnets: this.subnets.apply((s) => s.join(",")),

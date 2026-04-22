@@ -73,6 +73,8 @@ export interface CreateLoadBalancerResult {
   targetGroups: Map<string, aws.lb.TargetGroup>;
   listeners: aws.lb.Listener[];
   certificate?: aws.acm.Certificate;
+  certificateValidation?: aws.acm.CertificateValidation;
+  validationRecord?: aws.route53.Record;
   dnsRecord?: aws.route53.Record;
   targetEntries: ResolvedPortMapping[];
 }
@@ -142,20 +144,59 @@ export function createLoadBalancer(
   const needsCert = resolvedPorts.some((p) => p.listen.protocol === "https");
   let certificateArn: pulumi.Input<string> | undefined;
   let certificate: aws.acm.Certificate | undefined;
+  let certificateValidation: aws.acm.CertificateValidation | undefined;
+  let validationRecord: aws.route53.Record | undefined;
 
   if (needsCert) {
     if (args.domain?.cert) {
       certificateArn = args.domain.cert;
-    } else if (args.domain) {
+    } else if (args.domain?.hostedZoneId) {
+      const domain = args.domain;
+      const hostedZoneId = domain.hostedZoneId;
+      if (!hostedZoneId) {
+        throw new Error("HTTPS listener without `domain.cert` requires `domain.hostedZoneId`");
+      }
       certificate = new aws.acm.Certificate(
         `${name}Certificate`,
         {
-          domainName: args.domain.name,
+          domainName: domain.name,
           validationMethod: "DNS",
         },
         { parent },
       );
-      certificateArn = certificate.arn;
+      validationRecord = new aws.route53.Record(
+        `${name}CertificateValidationRecord`,
+        {
+          zoneId: hostedZoneId,
+          name: certificate.domainValidationOptions.apply(
+            (options) => options?.[0]?.resourceRecordName ?? `_acm-validation.${domain.name}`,
+          ),
+          type: certificate.domainValidationOptions.apply(
+            (options) => options?.[0]?.resourceRecordType ?? "CNAME",
+          ),
+          ttl: 60,
+          records: [
+            certificate.domainValidationOptions.apply(
+              (options) => options?.[0]?.resourceRecordValue ?? "validation-placeholder",
+            ),
+          ],
+          allowOverwrite: true,
+        },
+        { parent },
+      );
+      certificateValidation = new aws.acm.CertificateValidation(
+        `${name}CertificateValidation`,
+        {
+          certificateArn: certificate.arn,
+          validationRecordFqdns: [validationRecord.fqdn],
+        },
+        { parent },
+      );
+      certificateArn = certificateValidation.certificateArn;
+    } else if (args.domain) {
+      throw new Error(
+        "HTTPS listener without `domain.cert` requires `domain.hostedZoneId` for DNS validation",
+      );
     } else {
       throw new Error("HTTPS listener requires a `domain.name` (and optionally `cert`)");
     }
@@ -248,6 +289,8 @@ export function createLoadBalancer(
     targetGroups,
     listeners,
     certificate,
+    certificateValidation,
+    validationRecord,
     dnsRecord,
     targetEntries,
   };

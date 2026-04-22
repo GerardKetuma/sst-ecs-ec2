@@ -38,9 +38,19 @@ export interface HealthCheck {
   retries?: Input<number>;
 }
 
+export type ContainerImage = Input<string> | ContainerImageBuildSpec;
+
+export interface ContainerImageBuildSpec {
+  context: Input<string>;
+  dockerfile?: Input<string>;
+  args?: Input<Record<string, Input<string>>>;
+  target?: Input<string>;
+  platform?: Input<string>;
+}
+
 export interface ContainerArgs {
   name: Input<string>;
-  image: Input<string>;
+  image: ContainerImage;
   cpu?: Input<number>;
   memory?: Input<number>;
   memoryReservation?: Input<number>;
@@ -99,8 +109,14 @@ export interface ClusterHandles {
   name: Input<string>;
   capacityProviderName: Input<string>;
   vpc: VpcShape;
+  architecture?: Architecture;
+  imageRepository?: {
+    repository: aws.ecr.Repository;
+    authToken: pulumi.Output<aws.ecr.GetAuthorizationTokenResult>;
+  };
   nodes: {
     cluster: aws.ecs.Cluster;
     clusterCapacityProviders?: aws.ecs.ClusterCapacityProviders;
+    repository?: aws.ecr.Repository;
   };
 }

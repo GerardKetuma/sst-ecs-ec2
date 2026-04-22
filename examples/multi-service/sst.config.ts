@@ -26,20 +26,19 @@ export default $config({
 
     const api = new ServiceEc2("Api", {
       cluster,
-      image: "nginxdemos/hello:plain-text",
+      image: { context: "./api" },
       cpu: 256,
       memory: 512,
       scaling: { min: 1, max: 4 },
       loadBalancer: {
         public: true,
-        ports: [{ listen: "80/http" }],
+        ports: [{ listen: "80/http", forward: "3000/http" }],
       },
     });
 
     const worker = new ServiceEc2("Worker", {
       cluster,
-      image: "alpine:latest",
-      command: ["sh", "-c", "while true; do echo working; sleep 10; done"],
+      image: { context: "./worker" },
       cpu: 128,
       memory: 256,
       scaling: { min: 1, max: 3, cpuUtilization: 60 },

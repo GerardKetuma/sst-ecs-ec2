@@ -35,6 +35,20 @@ pulumi.runtime.setMocks(
         state.arn = `arn:aws:iam::123456789012:instance-profile/${args.name}`;
         state.name = args.name;
       }
+      if (args.type === "aws:ecr/repository:Repository") {
+        const repoName =
+          typeof args.inputs.name === "string" && args.inputs.name.length > 0
+            ? args.inputs.name
+            : args.name;
+        state.arn = `arn:aws:ecr:us-east-1:123456789012:repository/${repoName}`;
+        state.name = repoName;
+        state.registryId = "123456789012";
+        state.repositoryUrl = `123456789012.dkr.ecr.us-east-1.amazonaws.com/${repoName}`;
+      }
+      if (args.type === "docker-build:index:Image") {
+        state.ref = `123456789012.dkr.ecr.us-east-1.amazonaws.com/test:${args.name}@sha256:deadbeef`;
+        state.digest = "sha256:deadbeef";
+      }
       return { id: `${args.name}-id`, state };
     },
     call(args: pulumi.runtime.MockCallArgs): Record<string, unknown> {
@@ -49,6 +63,15 @@ pulumi.runtime.setMocks(
       }
       if (args.token === "aws:index/getCallerIdentity:getCallerIdentity") {
         return { accountId: "123456789012", userId: "x", arn: "arn:x" };
+      }
+      if (args.token === "aws:ecr/getAuthorizationToken:getAuthorizationToken") {
+        return {
+          authorizationToken: "QVdTOnRva2Vu",
+          expiresAt: "2026-01-01T00:00:00Z",
+          password: "token",
+          proxyEndpoint: "https://123456789012.dkr.ecr.us-east-1.amazonaws.com",
+          userName: "AWS",
+        };
       }
       return {};
     },

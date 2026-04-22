@@ -4,6 +4,7 @@ import type {
   Architecture,
   ClusterHandles,
   ContainerArgs,
+  ContainerImage,
   HealthCheck,
   Input,
   LinkInclude,
@@ -13,6 +14,7 @@ import type {
   Transform,
   VolumeConfig,
 } from "./types.js";
+import type { ImageBuildContext } from "./image-builder.js";
 import {
   createExecutionRole,
   createTaskRole,
@@ -44,7 +46,7 @@ export interface TaskEc2Transform {
 export interface TaskEc2Args {
   cluster: ClusterHandles;
 
-  image?: Input<string>;
+  image?: ContainerImage;
   command?: Input<Input<string>[]>;
   entrypoint?: Input<Input<string>[]>;
   environment?: Input<Record<string, Input<string>>>;
@@ -60,6 +62,8 @@ export interface TaskEc2Args {
   volumes?: VolumeConfig[];
 
   public?: boolean;
+
+  imageBuildContext?: ImageBuildContext;
 
   taskRole?: Input<string>;
   executionRole?: Input<string>;
@@ -98,7 +102,9 @@ export class TaskEc2 extends pulumi.ComponentResource {
     const cpu = normalizeCpu(args.cpu);
     const memory = normalizeMemory(args.memory);
 
-    const containers = buildContainers(name, args);
+    const imageBuildContext =
+      args.imageBuildContext ?? deriveImageBuildContext(args.cluster, architecture, this);
+    const containers = buildContainers(name, args, { imageBuildContext });
 
     const taskRoleArgs: CreateTaskRoleArgs = {
       existingRoleArn: args.taskRole,
@@ -207,4 +213,18 @@ export class TaskEc2 extends pulumi.ComponentResource {
     ];
     return { properties, include };
   }
+}
+
+function deriveImageBuildContext(
+  cluster: ClusterHandles,
+  architecture: Architecture,
+  parent: pulumi.ComponentResource,
+): ImageBuildContext | undefined {
+  if (!cluster.imageRepository) return undefined;
+  return {
+    repository: cluster.imageRepository.repository,
+    authToken: cluster.imageRepository.authToken,
+    architecture: cluster.architecture ?? architecture,
+    parent,
+  };
 }

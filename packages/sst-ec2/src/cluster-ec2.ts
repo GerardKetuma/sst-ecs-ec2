@@ -47,6 +47,7 @@ export interface ClusterEc2Transform {
   launchTemplate?: Transform<aws.ec2.LaunchTemplateArgs>;
   autoScalingGroup?: Transform<aws.autoscaling.GroupArgs>;
   instanceRole?: Transform<aws.iam.RoleArgs>;
+  repository?: Transform<aws.ecr.RepositoryArgs>;
   userDataToml?: (settings: BottlerocketSettings) => BottlerocketSettings;
 }
 
@@ -69,6 +70,7 @@ export interface ClusterEc2GetArgs {
   clusterName: Input<string>;
   capacityProviderName: Input<string>;
   vpc: VpcShape;
+  architecture?: Architecture;
 }
 
 export class ClusterEc2 extends pulumi.ComponentResource implements ClusterHandles {
@@ -77,6 +79,11 @@ export class ClusterEc2 extends pulumi.ComponentResource implements ClusterHandl
   public readonly name: pulumi.Output<string>;
   public readonly capacityProviderName: pulumi.Output<string>;
   public readonly vpc: VpcShape;
+  public readonly architecture: Architecture;
+  public readonly imageRepository: {
+    repository: aws.ecr.Repository;
+    authToken: pulumi.Output<aws.ecr.GetAuthorizationTokenResult>;
+  };
   public readonly nodes: {
     cluster: aws.ecs.Cluster;
     launchTemplate?: aws.ec2.LaunchTemplate;
@@ -86,6 +93,7 @@ export class ClusterEc2 extends pulumi.ComponentResource implements ClusterHandl
     instanceRole?: aws.iam.Role;
     instanceProfile?: aws.iam.InstanceProfile;
     trunking?: aws.ecs.AccountSettingDefault;
+    repository?: aws.ecr.Repository;
   };
 
   constructor(name: string, args: ClusterEc2Args, opts?: pulumi.ComponentResourceOptions) {
@@ -199,11 +207,32 @@ export class ClusterEc2 extends pulumi.ComponentResource implements ClusterHandl
 
     const trunking = enableTrunking ? enableAwsvpcTrunking(name, this) : undefined;
 
+    const repoArgs: aws.ecr.RepositoryArgs = {
+      name: defaultRepositoryName(cluster.name),
+      imageTagMutability: "MUTABLE",
+      forceDelete: true,
+      imageScanningConfiguration: { scanOnPush: true },
+      tags: { "sst-ec2:cluster": name },
+    };
+    const [repoName, repoFinal, repoOpts] = applyTransform(
+      args.transform?.repository,
+      `${name}Repository`,
+      repoArgs,
+      { parent: this },
+    );
+    const repository = new aws.ecr.Repository(repoName, repoFinal, repoOpts);
+    const authToken = aws.ecr.getAuthorizationTokenOutput(
+      { registryId: repository.registryId },
+      { parent: this },
+    );
+
     this.id = cluster.id;
     this.arn = cluster.arn;
     this.name = cluster.name;
     this.capacityProviderName = capacityProvider.name;
     this.vpc = args.vpc;
+    this.architecture = architecture;
+    this.imageRepository = { repository, authToken };
     this.nodes = {
       cluster,
       launchTemplate,
@@ -213,6 +242,7 @@ export class ClusterEc2 extends pulumi.ComponentResource implements ClusterHandl
       instanceRole,
       instanceProfile,
       trunking,
+      repository,
     };
 
     this.registerOutputs({
@@ -225,7 +255,7 @@ export class ClusterEc2 extends pulumi.ComponentResource implements ClusterHandl
 
   static get(name: string, args: ClusterEc2GetArgs, opts?: pulumi.ComponentResourceOptions): ClusterHandles {
     const cluster = aws.ecs.Cluster.get(`${name}Cluster`, args.clusterName, {}, opts);
-    return {
+    const handles: ClusterHandles = {
       id: cluster.id,
       arn: cluster.arn,
       name: cluster.name,
@@ -233,6 +263,8 @@ export class ClusterEc2 extends pulumi.ComponentResource implements ClusterHandl
       vpc: args.vpc,
       nodes: { cluster, clusterCapacityProviders: undefined },
     };
+    if (args.architecture) handles.architecture = args.architecture;
+    return handles;
   }
 }
 
@@ -257,4 +289,8 @@ function normalizeSpot(
         ? spot.instanceTypes
         : [fallbackInstanceType],
   };
+}
+
+function defaultRepositoryName(clusterName: pulumi.Input<string>): pulumi.Output<string> {
+  return pulumi.output(clusterName).apply((name) => `${name.toLowerCase()}-images`);
 }

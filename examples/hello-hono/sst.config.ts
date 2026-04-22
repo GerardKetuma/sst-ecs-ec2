@@ -26,12 +26,12 @@ export default $config({
 
     const api = new ServiceEc2("Api", {
       cluster,
-      image: "nginxdemos/hello:plain-text",
+      image: { context: "./app" },
       cpu: 256,
       memory: 256,
       loadBalancer: {
         public: true,
-        ports: [{ listen: "80/http", forward: "80/http" }],
+        ports: [{ listen: "80/http", forward: "3000/http" }],
       },
     });
 

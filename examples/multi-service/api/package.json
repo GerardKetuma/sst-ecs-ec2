@@ -1,0 +1,9 @@
+{
+  "name": "multi-service-api",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "hono": "^4.6.0",
+    "@hono/node-server": "^1.13.0"
+  }
+}

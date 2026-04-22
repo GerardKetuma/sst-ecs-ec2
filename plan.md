@@ -77,9 +77,12 @@ ecs-ec2-sst/                          # pnpm workspace root
 │       │   ├── capacity.ts           # ASG + LT + CapacityProvider helpers
 │       │   ├── bottlerocket.ts       # TOML user-data builder + AMI lookup
 │       │   ├── task-definition.ts    # EC2-flavored task-def builder
-│       │   ├── normalize.ts          # cpu/memory/containers normalization
-│       │   ├── iam.ts                # re-exports from sst's fargate.ts helpers
-│       │   ├── load-balancer.ts      # extracted ALB/listener/target wiring
+│       │   ├── containers.ts         # container normalization + image resolution
+│       │   ├── image-builder.ts      # docker-build → shared ECR push
+│       │   ├── normalize.ts          # arch/network/cpu/memory normalization
+│       │   ├── iam.ts                # instance/task/execution role builders
+│       │   ├── load-balancer.ts      # ALB/listener/target wiring + ACM
+│       │   ├── transform.ts          # applyTransform helper
 │       │   └── types.ts              # shared input types
 │       └── tests/
 │           ├── cluster-ec2.test.ts
@@ -131,6 +134,7 @@ Decision: **vendor**. It's explicit, survives SST internal refactors, and makes 
 │   ├─ aws.autoscaling.Group (mixed instances policy)            │
 │   ├─ aws.ecs.CapacityProvider (managed scaling + termination)  │
 │   ├─ aws.ecs.ClusterCapacityProviders (links CP → cluster)     │
+│   ├─ aws.ecr.Repository (shared for all service/task builds)   │
 │   └─ (side-effect) aws:PutAccountSetting awsvpcTrunking=on     │
 └────────────────────────────────────────────────────────────────┘
              ▲                              ▲
@@ -141,7 +145,10 @@ Decision: **vendor**. It's explicit, survives SST internal refactors, and makes 
 │   ├─ IAM task role         │  │   ├─ IAM task role         │
 │   ├─ IAM execution role    │  │   ├─ IAM execution role    │
 │   ├─ CW LogGroup per ctr   │  │   ├─ CW LogGroup per ctr   │
-│   ├─ ECR images (built)    │  │   ├─ ECR images (built)    │
+│   ├─ docker-build.Image    │  │   ├─ docker-build.Image    │
+│   │  (when image is a      │  │   │  (when image is a      │
+│   │   build spec; pushed   │  │   │   build spec; pushed   │
+│   │   to cluster's ECR)    │  │   │   to cluster's ECR)    │
 │   ├─ ECS TaskDefinition    │  │   ├─ ECS TaskDefinition    │
 │   │   (EC2 compat, awsvpc) │  │   │   (EC2 compat, awsvpc) │
 │   ├─ ALB + Listener(s)     │  │   └─ (no ECS Service — run │
@@ -154,12 +161,14 @@ Decision: **vendor**. It's explicit, survives SST internal refactors, and makes 
 └────────────────────────────┘
 ```
 
+Container `image` is dual-form: pass a string URI (`"nginx:1.27"`, pre-built) to use it verbatim, or pass a build spec (`{ context: "./app", dockerfile?, args?, target?, platform? }`) to have the component build via buildx and push to the cluster's shared ECR. The build platform defaults to the cluster's `architecture` (`linux/amd64` for `x86_64`, `linux/arm64` for `arm64`) and can be overridden per container.
+
 ### Key runtime flow
 
 **Deploy:**
-1. `ClusterEc2` creates cluster, builds Bottlerocket TOML user-data, provisions LT + ASG + CP, attaches CP as default strategy.
+1. `ClusterEc2` creates cluster, builds Bottlerocket TOML user-data, provisions LT + ASG + CP, attaches CP as default strategy, and provisions the shared ECR repository.
 2. ASG boots N instances with `minSize` capacity; Bottlerocket boots in ~20-30s; ecs-agent registers; CP goes `ACTIVE`.
-3. `ServiceEc2` builds task role, execution role, images, task def (with `requiresCompatibilities: ["EC2"]`, `networkMode: "awsvpc"`).
+3. `ServiceEc2` resolves each container's image: string URIs pass through unchanged; build specs trigger a `docker-build.Image` resource that builds via buildx with the cluster's architecture as default platform and pushes to the cluster's shared ECR. Task role, execution role, and task def are created next (`requiresCompatibilities: ["EC2"]`, `networkMode: "awsvpc"`).
 4. `ServiceEc2` creates ALB, target group (`targetType: "ip"`), listener, ECS service with `capacityProviderStrategies: [{ capacityProvider: cluster.capacityProviderName }]`.
 5. App-autoscaling policies attached to service.
 
@@ -188,8 +197,12 @@ import type * as aws from "@pulumi/aws";
 import type { Input } from "@pulumi/pulumi";
 
 export interface ClusterEc2Args {
-  // Reuse SST's Vpc component or shape
-  vpc: sst.aws.Vpc | Input<ClusterVpcArgs>;
+  /**
+   * Structural VPC descriptor. Accepts anything that matches `VpcShape`
+   * (id + security group + subnet inputs) — `sst.aws.Vpc` fits, but so does
+   * any plain object. No direct dependency on SST.
+   */
+  vpc: VpcShape;
 
   /** Bottlerocket variant. Defaults to "aws-ecs-2". */
   variant?: Input<"aws-ecs-1" | "aws-ecs-2">;
@@ -257,9 +270,10 @@ export interface ClusterEc2Args {
 }
 
 export interface ClusterEc2GetArgs {
-  id: Input<string>;
-  vpc: ClusterEc2Args["vpc"];
+  clusterName: Input<string>;
   capacityProviderName: Input<string>;
+  vpc: VpcShape;
+  architecture?: Architecture;
 }
 ```
 
@@ -318,17 +332,19 @@ export interface TaskEc2Args
 
 ## 6. Reuse strategy
 
-### Vendored from `sst/sst@dev:platform/src/components/aws/` into `packages/sst-ec2/src/_vendored/`
+### Originally planned to vendor from SST — superseded by re-implementation
 
-| Symbol | Source | Why |
+Plan §10 "Mid-implementation deviation" explains the decision to re-implement rather than vendor these symbols. The table below is kept as a record of what SST ships that inspired each of our re-implementations.
+
+| Symbol | SST source (reference only) | Our re-implementation |
 |---|---|---|
-| `FargateContainerArgs` | `fargate.ts:133` | Input type shape — copy verbatim |
-| `normalizeArchitecture` | `fargate.ts:805` | Launch-type-independent |
-| `normalizeContainers` | `fargate.ts:849` | Touches no port mappings; handles image/env/logging/volumes cleanly |
-| `createTaskRole` | `fargate.ts:949` | Same principal (`ecs-tasks.amazonaws.com`); reuse verbatim |
-| `createExecutionRole` | `fargate.ts:1009` | Same as above |
-| `DnsValidatedCertificate` | sst internal | For ALB HTTPS support |
-| `imageBuilder` | sst internal | For docker-build → ECR push |
+| `FargateContainerArgs` | `fargate.ts:133` | `ContainerArgs` in `src/types.ts` |
+| `normalizeArchitecture` | `fargate.ts:805` | `normalizeArchitecture` in `src/normalize.ts` |
+| `normalizeContainers` | `fargate.ts:849` | `buildContainers` in `src/containers.ts` |
+| `createTaskRole` | `fargate.ts:949` | `createTaskRole` in `src/iam.ts` |
+| `createExecutionRole` | `fargate.ts:1009` | `createExecutionRole` in `src/iam.ts` |
+| HTTPS cert wiring (SST `DnsValidatedCertificate`) | sst internal | `aws.acm.Certificate` + `aws.acm.CertificateValidation` directly in `src/load-balancer.ts` |
+| Image build pipeline (SST `imageBuilder`) | sst internal | `buildImage` / `resolveImage` in `src/image-builder.ts`, backed by `@pulumi/docker-build` and the shared ECR repo created on `ClusterEc2` |
 
 ### Rewritten in the new package
 
@@ -586,7 +602,7 @@ Long-term intent: fold this into SST proper. Roadmap:
 
 ## 10. Implementation todo list
 
-> Status summary: Phases 0–6 are implemented in-tree (typecheck + **63 unit tests passing**, up from 35 after the post-review pass). Phase 7 (upstream PRs) is external coordination work not performed by this implementation pass. Phase 8 is explicit post-MVP scope.
+> Status summary: Phases 0–6 are implemented in-tree (typecheck + **76 unit tests passing**, up from 63 after the image-builder follow-up). Phase 7 (upstream PRs) is external coordination work not performed by this implementation pass. Phase 8 is explicit post-MVP scope.
 
 ### Post-review fix pass (applied)
 
@@ -600,8 +616,9 @@ A code review against this plan surfaced three correctness bugs and several qual
 - **Narrowed IAM** — execution role's SSM/Secrets/KMS statement now scopes `Resource` to the secret ARNs declared on container `secrets` (falls back to `*` only when nothing is declared, preserving runtime-fetch ergonomics).
 - **Nits** — `healthCheck.matcher` default tightened from `"200-399"` to `"200"` with full per-field override; `lbScheme` computed via `parsePortString` instead of string suffix sniff; cast in `task-definition.ts` now has a comment explaining why `pulumi.output(...)` loses literal union types.
 - **Shared helpers** — `src/containers.ts` holds `buildContainers`, `collectEnvironmentFiles`, `collectSecretArns`, `firstContainerName`, deduplicating 60+ LOC of copy-paste between `service-ec2.ts` and `task-ec2.ts`.
+- **Image-build pipeline added (follow-up fix)** — `src/image-builder.ts` wraps `@pulumi/docker-build`. `ClusterEc2` now always provisions a shared `aws.ecr.Repository` (exposed via `cluster.imageRepository` + `nodes.repository`, with `transform.repository` escape hatch). Services and tasks accept dual-form `image`: a passthrough URI (`Input<string>`) or a build spec (`{ context, dockerfile?, args?, target?, platform? }`). Build specs are built with buildx, tagged `<repo>:<serviceName>`, and pushed via ECR auth. Cluster `architecture` drives the default `linux/amd64` vs `linux/arm64` platform; per-container `platform` overrides it. Clusters looked up via `ClusterEc2.get()` lack the repo, so passing a build spec there throws with a clear message.
 
-New tests added (28 of the 63 total):
+New tests added (38 of the 76 total):
 
 | File | What it covers |
 |---|---|
@@ -611,10 +628,11 @@ New tests added (28 of the 63 total):
 | `tests/load-balancer-advanced.test.ts` | HTTPS cert creation; existing-cert reuse; Route53 alias; DNS omission; matcher default vs override; `transform.loadBalancerSecurityGroup` |
 | `tests/service-advanced.test.ts` | `dependsOn` wiring (with + without ccp); CloudMap service + registry; missing-namespace error; scoped secrets in exec role; https URL computation |
 | `tests/task-advanced.test.ts` | B1 regression; full `getSSTLink` properties; public-IP flip |
+| `tests/image-builder.test.ts` | `isImageBuildSpec` discrimination; `platformForArchitecture`; string passthrough; build-spec → ECR push ref; missing-repo error on `ClusterEc2.get()`; platform override; cluster ECR wiring; ServiceEc2 + TaskEc2 end-to-end build-spec integration |
 
 ### Mid-implementation deviation from plan
 
-Plan §6 called for vendoring SST helpers (`createTaskRole`, `createExecutionRole`, `normalizeContainers`) into `_vendored/`. On inspection, those helpers have deep dependencies on SST-internal modules (`Component`, `Link`, `Permission`, `VisibleError`, `bootstrap`, `imageBuilder`), which would have forced us to either vendor the whole dependency graph or stub out those boundaries with shims. Re-implementing the handful of functions we actually need (`iam.ts`, `normalize.ts`, `task-definition.ts`) turned out cheaper (~350 LOC) and leaves the package truly standalone — no pinned SST commit to drift against. VENDOR.md and the drift-check CI job are therefore not needed.
+Plan §6 called for vendoring SST helpers (`createTaskRole`, `createExecutionRole`, `normalizeContainers`, `imageBuilder`, `DnsValidatedCertificate`) into `_vendored/`. On inspection, those helpers have deep dependencies on SST-internal modules (`Component`, `Link`, `Permission`, `VisibleError`, `bootstrap`), which would have forced us to either vendor the whole dependency graph or stub out those boundaries with shims. Re-implementing the handful of functions we actually need (`iam.ts`, `normalize.ts`, `task-definition.ts`, `load-balancer.ts`'s ACM wiring, and `image-builder.ts` on top of `@pulumi/docker-build`) turned out cheaper (~500 LOC including the image builder) and leaves the package truly standalone — no pinned SST commit to drift against. VENDOR.md and the drift-check CI job are therefore not needed.
 
 ### Phase 0 — Repo scaffolding
 

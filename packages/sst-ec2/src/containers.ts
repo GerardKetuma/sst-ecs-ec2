@@ -1,8 +1,9 @@
 import * as pulumi from "@pulumi/pulumi";
-import type { ContainerArgs, HealthCheck, Input } from "./types.js";
+import type { ContainerArgs, ContainerImage, HealthCheck, Input } from "./types.js";
+import { type ImageBuildContext, resolveImage } from "./image-builder.js";
 
 export interface SingleContainerInput {
-  image?: Input<string>;
+  image?: ContainerImage;
   command?: Input<Input<string>[]>;
   entrypoint?: Input<Input<string>[]>;
   environment?: Input<Record<string, Input<string>>>;
@@ -16,11 +17,17 @@ export interface BuildContainersResult {
   containers: ContainerArgs[];
 }
 
+export interface BuildContainersOptions {
+  portMappings?: ContainerArgs["portMappings"];
+  imageBuildContext?: ImageBuildContext;
+}
+
 export function buildContainers(
   name: string,
   args: SingleContainerInput,
-  extra?: { portMappings?: ContainerArgs["portMappings"] },
+  opts?: BuildContainersOptions,
 ): ContainerArgs[] {
+  const ctx = opts?.imageBuildContext;
   if (args.containers && args.containers.length > 0) {
     if (
       args.image ||
@@ -35,23 +42,36 @@ export function buildContainers(
         "Cannot provide both `containers` and top-level `image`/`command`/`environment` etc.",
       );
     }
-    return args.containers;
+    return args.containers.map((c, idx) => resolveContainerImage(c, ctx, `${name}-${idx}`));
   }
   if (!args.image) {
     throw new Error("`image` is required when `containers` is not provided");
   }
   const container: ContainerArgs = {
     name,
-    image: args.image,
+    image: resolveImage(`${name}`, args.image, ctx),
     command: args.command,
     entrypoint: args.entrypoint,
     environment: args.environment,
     environmentFiles: args.environmentFiles,
     secrets: args.secrets,
     health: args.health,
-    ...(extra?.portMappings ? { portMappings: extra.portMappings } : {}),
+    ...(opts?.portMappings ? { portMappings: opts.portMappings } : {}),
   };
   return [container];
+}
+
+function resolveContainerImage(
+  c: ContainerArgs,
+  ctx: ImageBuildContext | undefined,
+  fallbackName: string,
+): ContainerArgs {
+  const resolvedImage = resolveImage(
+    typeof c.name === "string" ? c.name : fallbackName,
+    c.image,
+    ctx,
+  );
+  return { ...c, image: resolvedImage };
 }
 
 export function firstContainerName(containers: ContainerArgs[]): Input<string> {

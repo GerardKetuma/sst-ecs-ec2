@@ -37,6 +37,8 @@ export type {
   BottlerocketVariant,
   ClusterHandles,
   ContainerArgs,
+  ContainerImage,
+  ContainerImageBuildSpec,
   HealthCheck,
   LinkInclude,
   LinkReceiver,
@@ -49,3 +51,11 @@ export type {
 } from "./types.js";
 
 export type { BottlerocketSettings } from "./bottlerocket.js";
+
+export {
+  buildImage,
+  isImageBuildSpec,
+  platformForArchitecture,
+  resolveImage,
+} from "./image-builder.js";
+export type { ImageBuildArgs, ImageBuildContext, ImageInput } from "./image-builder.js";

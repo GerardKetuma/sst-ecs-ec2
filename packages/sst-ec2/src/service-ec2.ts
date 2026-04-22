@@ -4,6 +4,7 @@ import type {
   Architecture,
   ClusterHandles,
   ContainerArgs,
+  ContainerImage,
   HealthCheck,
   Input,
   LinkInclude,
@@ -13,6 +14,7 @@ import type {
   Transform,
   VolumeConfig,
 } from "./types.js";
+import type { ImageBuildContext } from "./image-builder.js";
 import {
   createExecutionRole,
   createTaskRole,
@@ -94,7 +96,7 @@ export interface ServiceEc2Transform {
 export interface ServiceEc2Args {
   cluster: ClusterHandles;
 
-  image?: Input<string>;
+  image?: ContainerImage;
   command?: Input<Input<string>[]>;
   entrypoint?: Input<Input<string>[]>;
   environment?: Input<Record<string, Input<string>>>;
@@ -117,6 +119,13 @@ export interface ServiceEc2Args {
 
   wait?: boolean;
   enableExecuteCommand?: boolean;
+
+  /**
+   * Override the cluster-provided image build context.
+   * Useful when you want to force a build spec on a cluster referenced via
+   * `ClusterEc2.get()` (which has no attached ECR repo).
+   */
+  imageBuildContext?: ImageBuildContext;
 
   taskRole?: Input<string>;
   executionRole?: Input<string>;
@@ -162,7 +171,9 @@ export class ServiceEc2 extends pulumi.ComponentResource {
           return { containerPort: parsed.port, protocol: "tcp" as const };
         })
       : undefined;
-    const containers = buildContainers(name, args, { portMappings });
+    const imageBuildContext =
+      args.imageBuildContext ?? deriveImageBuildContext(args.cluster, architecture, this);
+    const containers = buildContainers(name, args, { portMappings, imageBuildContext });
 
     const scaling = normalizeScaling(args.scaling);
 
@@ -505,5 +516,19 @@ function normalizeScaling(s: ServiceEc2Scaling | undefined): NormalizedScaling {
     requestCount: s?.requestCount === false || s?.requestCount === undefined ? false : s.requestCount,
     scaleOutCooldown: s?.scaleOutCooldown ?? 300,
     scaleInCooldown: s?.scaleInCooldown ?? 300,
+  };
+}
+
+function deriveImageBuildContext(
+  cluster: ClusterHandles,
+  architecture: Architecture,
+  parent: pulumi.ComponentResource,
+): ImageBuildContext | undefined {
+  if (!cluster.imageRepository) return undefined;
+  return {
+    repository: cluster.imageRepository.repository,
+    authToken: cluster.imageRepository.authToken,
+    architecture: cluster.architecture ?? architecture,
+    parent,
   };
 }

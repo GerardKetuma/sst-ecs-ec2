@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.sst/
+*.tsbuildinfo
+.DS_Store
+sst-source/
+.pulumi/
+.env
+.env.local
+coverage/

@@ -1,0 +1,19 @@
+{
+  "name": "example-hello-hono",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "sst dev",
+    "deploy": "sst deploy",
+    "remove": "sst remove"
+  },
+  "dependencies": {
+    "@gketuma/sst-ec2": "workspace:*",
+    "hono": "^4.6.0",
+    "@hono/node-server": "^1.13.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

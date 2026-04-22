@@ -1,0 +1,58 @@
+{
+  "name": "@gketuma/sst-ec2",
+  "version": "0.1.0",
+  "description": "SST components for running ECS services and tasks on Bottlerocket EC2 container instances.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "@pulumi/aws": ">=6.0.0",
+    "@pulumi/pulumi": ">=3.0.0"
+  },
+  "dependencies": {
+    "@iarna/toml": "^2.2.5"
+  },
+  "devDependencies": {
+    "@pulumi/aws": "^6.65.0",
+    "@pulumi/pulumi": "^3.140.0",
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  },
+  "keywords": [
+    "sst",
+    "pulumi",
+    "aws",
+    "ecs",
+    "ec2",
+    "bottlerocket"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GerardKetuma/sst-ecs-ec2.git",
+    "directory": "packages/sst-ec2"
+  },
+  "homepage": "https://github.com/GerardKetuma/sst-ecs-ec2#readme",
+  "bugs": {
+    "url": "https://github.com/GerardKetuma/sst-ecs-ec2/issues"
+  },
+  "license": "MIT"
+}

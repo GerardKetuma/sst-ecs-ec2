@@ -24,25 +24,31 @@ pnpm typecheck
 pnpm test
 ```
 
-## Install in your SST project
+## Workflows
 
-Until a `0.1.0` release is cut, install directly from the repo:
+- **[`.github/workflows/ci.yml`](.github/workflows/ci.yml)** — runs on every push to `main` and every PR. Matrix: Node 20 + 22. Steps: checkout → pnpm install (frozen lockfile) → typecheck → test. Concurrency cancels stale runs on rapid pushes.
+- **[`.github/workflows/release.yml`](.github/workflows/release.yml)** — fires on `v*.*.*` tag push. Verifies tag matches `packages/sst-ec2/package.json` version (catches bump-forget mistakes), runs typecheck + tests, builds, packs a tarball, creates a GitHub Release with auto-generated notes and the tarball attached.
+
+## Cutting a release
+
+```sh
+# bump packages/sst-ec2/package.json from 0.1.0 → 0.1.1
+git commit -am "chore: bump to 0.1.1"
+git tag v0.1.1
+git push && git push --tags
+```
+
+The release workflow handles the rest.
+
+## Consumable right now
 
 ```sh
 pnpm add github:GerardKetuma/sst-ecs-ec2
 ```
 
-## Releasing
+## Encountered and fixed during setup
 
-Releases are cut by tag push:
-
-```sh
-# bump packages/sst-ec2/package.json version, then:
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The `Release` workflow runs typecheck + tests, verifies the tag matches `package.json`, builds, packs a tarball, and creates a GitHub Release with auto-generated notes.
+GitHub also flagged a deprecation notice: `actions/checkout@v4`, `setup-node@v4`, `pnpm/action-setup@v4` are on Node 20 runtime which'll force to Node 24 on 2026-06-02. Cosmetic for now (the job still succeeds) — can bump to `@v5` releases when available. Not blocking.
 
 ## Layout
 

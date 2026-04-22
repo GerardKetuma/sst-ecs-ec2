@@ -98,6 +98,7 @@ export interface SpotConfig {
 
 export interface CreateAsgArgs {
   launchTemplateId: pulumi.Input<string>;
+  launchTemplateVersion: pulumi.Input<string>;
   vpc: VpcShape;
   minSize: number;
   maxSize: number;
@@ -122,12 +123,12 @@ export function createAsg(
     healthCheckGracePeriod: 120,
     healthCheckType: "EC2",
     ...(args.spot
-      ? {
+        ? {
           mixedInstancesPolicy: {
             launchTemplate: {
               launchTemplateSpecification: {
                 launchTemplateId: args.launchTemplateId,
-                version: "$Latest",
+                version: args.launchTemplateVersion,
               },
               overrides: args.spot.instanceTypes.map((t) => ({ instanceType: t })),
             },
@@ -141,12 +142,17 @@ export function createAsg(
       : {
           launchTemplate: {
             id: args.launchTemplateId,
-            version: "$Latest",
+            version: args.launchTemplateVersion,
           },
         }),
     tags: [
       { key: "AmazonECSManaged", value: "true", propagateAtLaunch: true },
       { key: "Name", value: `${name}-ecs-instance`, propagateAtLaunch: true },
+      {
+        key: "sst-ec2:launch-template-version",
+        value: args.launchTemplateVersion,
+        propagateAtLaunch: true,
+      },
     ],
     instanceRefresh: {
       strategy: "Rolling",

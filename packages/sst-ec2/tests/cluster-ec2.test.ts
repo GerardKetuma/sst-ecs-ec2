@@ -59,6 +59,7 @@ describe("ClusterEc2", () => {
     expect(policy).toBeDefined();
     expect(policy?.instancesDistribution?.onDemandBaseCapacity).toBe(1);
     expect(policy?.instancesDistribution?.onDemandPercentageAboveBaseCapacity).toBe(20);
+    expect(policy?.launchTemplate?.launchTemplateSpecification?.version).not.toBe("$Latest");
   });
 
   it("validates capacity ranges", () => {
@@ -76,5 +77,13 @@ describe("ClusterEc2", () => {
     const tags = await resolve(asg.tags);
     expect(protectFromScaleIn).toBe(true);
     expect(tags?.some((t) => t.key === "AmazonECSManaged")).toBe(true);
+  });
+
+  it("pins the ASG launch template version instead of relying on $Latest", async () => {
+    const cluster = new ClusterEc2("Pinned", { vpc: testVpc() });
+    const asg = cluster.nodes.autoScalingGroup;
+    if (!asg) throw new Error("asg missing");
+    const launchTemplate = await resolve(asg.launchTemplate);
+    expect(launchTemplate?.version).not.toBe("$Latest");
   });
 });

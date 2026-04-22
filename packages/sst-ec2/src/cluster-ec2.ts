@@ -163,6 +163,7 @@ export class ClusterEc2 extends pulumi.ComponentResource implements ClusterHandl
       name,
       {
         launchTemplateId: launchTemplate.id,
+        launchTemplateVersion: pulumi.output(launchTemplate.latestVersion).apply((v) => String(v)),
         vpc: args.vpc,
         minSize,
         maxSize,

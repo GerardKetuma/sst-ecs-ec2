@@ -107,7 +107,7 @@ describe("ServiceEc2 — dependsOn + CloudMap + IAM scoping", () => {
       image: "nginx:latest",
       loadBalancer: {
         ports: [{ listen: "443/https", forward: "3000/http" }],
-        domain: { name: "api.example.com" },
+        domain: { name: "api.example.com", hostedZoneId: "Z123456ABC" },
       },
     });
     const url = await resolve(svc.url);
